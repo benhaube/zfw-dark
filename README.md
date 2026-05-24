@@ -1,6 +1,6 @@
 # ZFW — a host firewall for ZimaOS
 
-> **Current release:** v0.5.5 — see [Status](#status) for the build line.
+> **Current release:** v0.5.6 — see [Status](#status) for the build line.
 
 ZFW is a standalone ZimaOS module that adds the one thing ZimaOS does not ship:
 a **host firewall** — with a web UI and a live security dashboard.
@@ -162,6 +162,39 @@ For a full operating guide — staying reachable, rule ordering, geo-blocking
 limits and recovery — see **[BEST-PRACTICES.md](BEST-PRACTICES.md)**.
 
 ## Status
+
+**v0.5.6** — third v1.0 item: **outbound rules (OUTPUT + FORWARD)**.
+The largest v1.0 lift: rules can now target traffic leaving the host
+or containers, not just traffic arriving. Schema bumps **v2 → v3**
+(second real use of v0.3.8's migrate() plumbing) to add the
+field-additive `Rule.Direction` (empty / `inbound` = historical
+default; `outbound` = new). The compiler emits up to three new
+iptables chains when at least one outbound rule exists:
+
+  * `ZFW-OUT`     — host-initiated outbound, hooked into OUTPUT
+  * `ZFW-OUT6`    — IPv6 mirror, hooked into ip6tables OUTPUT
+  * `ZFW-FWD-OUT` — container-initiated outbound, hooked into FORWARD
+
+Zone routing reuses the existing `Rule.Zone`: `host|auto` → ZFW-OUT,
+`docker|auto` → ZFW-FWD-OUT. **The outbound chains never
+default-deny** — they always terminate in RETURN — because a blanket
+OUTPUT/FORWARD denial would break the host's own DNS / NTP / Docker
+registry pulls and the gateway forwarding. Outbound is per-rule
+allow/deny, never policy-wide. For outbound rules the `Source` field
+flips semantically: it is the destination peer (compiler emits `-d`
+instead of `-s`); the UI's source label changes to "Destination /
+peer" when the user picks outbound. A rule set with zero outbound
+rules compiles to a byte-identical script vs. pre-v0.5.6, so
+existing deployments are unaffected. Engine `revert` extends to
+flush + detach + delete the new chains; engine `status` lists them
+too. Four new compiler tests cover the emit shape, the back-compat
+absence-of-outbound, and the safety invariant that ZFW-OUT
+terminates in RETURN not DROP. UI: new Direction select in the rule
+editor + a yellow `→` pill on the rule-table row for outbound rules.
+`ruleSignature` picks up the new field so a direction-only edit
+shows up in the diff. OpenAPI Rule.direction documented with the
+enum. Deployed and verified live on .167 — installation includes
+the engine-revert update.
 
 **v0.5.5** — second v1.0 item: **notification hooks (webhook)**. New
 `internal/notify` package: opt-in outbound webhook fired on every
